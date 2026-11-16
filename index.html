@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Min körstämma – Kamera</title>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;background:#f3f6f4;color:#173b29}
+main{max-width:650px;margin:auto;padding:20px}h1{font-size:26px}
+section{background:white;border-radius:14px;padding:18px;margin:14px 0;box-shadow:0 1px 5px #0001}
+input[type=file]{display:block;width:100%;padding:16px;border:2px dashed #70a785;border-radius:10px}
+button{background:#16834a;color:white;border:0;padding:14px;border-radius:9px;font-size:16px;margin:5px 5px 5px 0}
+button:disabled{opacity:.4}canvas,img{max-width:100%;height:auto;display:block;border-radius:8px}
+canvas{touch-action:none;width:100%}small{color:#52695b}#resultSection{display:none}
+</style>
+</head>
+<body>
+<main>
+<h1>🎵 Min körstämma</h1>
+<p>Fotografera en takt, några takter eller en hel sida.</p>
+<section>
+<h2>1. Ta ett foto</h2>
+<input id="camera" type="file" accept="image/*" capture="environment">
+<p><small>På Android kan kameran öppnas direkt eller visas som ett val.</small></p>
+</section>
+<section id="editSection" hidden>
+<h2>2. Markera noterna</h2>
+<p>Dra med fingret över det område du vill använda.</p>
+<canvas id="preview"></canvas>
+<button id="all">Hela bilden</button>
+<button id="crop">Beskär</button>
+</section>
+<section id="resultSection">
+<h2>3. Ditt notavsnitt</h2>
+<img id="result" alt="Beskurna noter">
+<p id="size"></p>
+<button id="save">Spara notbild</button>
+</section>
+<p id="status" role="status">Redo att fotografera.</p>
+<p><small>Denna version testar kamera och beskärning. Automatisk notigenkänning kommer senare.</small></p>
+</main>
+<script>
+(function(){
+const $=id=>document.getElementById(id),canvas=$('preview'),ctx=canvas.getContext('2d');
+let image=null,rect=null,start=null,result=null;
+function draw(){
+ if(!image)return;
+ ctx.clearRect(0,0,canvas.width,canvas.height);
+ ctx.drawImage(image,0,0,canvas.width,canvas.height);
+ if(rect){
+  ctx.fillStyle='rgba(0,0,0,.3)';ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(image,rect.x,rect.y,rect.w,rect.h,rect.x,rect.y,rect.w,rect.h);
+  ctx.strokeStyle='#13a05a';ctx.lineWidth=3;ctx.strokeRect(rect.x,rect.y,rect.w,rect.h);
+ }
+}
+function pos(e){const b=canvas.getBoundingClientRect();return{x:Math.max(0,Math.min(canvas.width,(e.clientX-b.left)*canvas.width/b.width)),y:Math.max(0,Math.min(canvas.height,(e.clientY-b.top)*canvas.height/b.height))}}
+$('camera').addEventListener('change',async e=>{
+ const file=e.target.files[0];if(!file)return;
+ try{
+ const url=URL.createObjectURL(file),im=new Image();
+ await new Promise((ok,fail)=>{im.onload=ok;im.onerror=fail;im.src=url});
+ image=im;
+ const scale=Math.min(1,1800/im.naturalWidth,2400/im.naturalHeight);
+ canvas.width=Math.max(1,Math.round(im.naturalWidth*scale));
+ canvas.height=Math.max(1,Math.round(im.naturalHeight*scale));
+ rect={x:0,y:0,w:canvas.width,h:canvas.height};
+ $('editSection').hidden=false;$('resultSection').style.display='none';
+ draw();URL.revokeObjectURL(url);$('status').textContent='Foto klart! Markera ett notavsnitt.';
+ }catch(err){$('status').textContent='Kunde inte läsa bilden.'}
+});
+canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);start=pos(e);rect={x:start.x,y:start.y,w:1,h:1};draw()});
+canvas.addEventListener('pointermove',e=>{if(!start)return;const p=pos(e);rect={x:Math.min(start.x,p.x),y:Math.min(start.y,p.y),w:Math.abs(p.x-start.x),h:Math.abs(p.y-start.y)};draw()});
+canvas.addEventListener('pointerup',()=>start=null);
+canvas.addEventListener('pointercancel',()=>start=null);
+$('all').onclick=()=>{rect={x:0,y:0,w:canvas.width,h:canvas.height};draw()};
+$('crop').onclick=()=>{
+ if(!rect||rect.w<5||rect.h<5)return;
+ const c=document.createElement('canvas');c.width=Math.round(rect.w);c.height=Math.round(rect.h);
+ c.getContext('2d').drawImage(canvas,rect.x,rect.y,rect.w,rect.h,0,0,c.width,c.height);
+ result=c.toDataURL('image/png');$('result').src=result;
+ $('size').textContent=c.width+' × '+c.height+' pixlar';
+ $('resultSection').style.display='block';
+ $('status').textContent='Notavsnittet är beskuret.';
+};
+$('save').onclick=()=>{if(!result)return;const a=document.createElement('a');a.href=result;a.download='notavsnitt.png';a.click()};
+})();
+</script>
+</body>
+</html>
