@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Min körstämma – Kamera v15.0.3</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f3f6f4;color:#183d2b;font-family:system-ui,-apple-system,sans-serif}
+main{max-width:700px;margin:auto;padding:20px}
+h1{font-size:26px;margin-bottom:6px}
+h2{font-size:19px}
+section{background:white;border-radius:14px;padding:18px;margin:16px 0;box-shadow:0 1px 5px #0001}
+input[type=file]{display:block;width:100%;padding:15px;border:2px dashed #80b294;border-radius:10px;background:#f9fcfa}
+button{background:#16834a;color:#fff;border:0;border-radius:10px;padding:13px 17px;font-size:16px;font-weight:600;margin:5px 5px 5px 0}
+button.secondary{background:#e6f0e9;color:#184d30}
+#editor{position:relative;line-height:0;touch-action:none;user-select:none;-webkit-user-select:none}
+#photo{width:100%;height:auto;display:block;border-radius:8px;pointer-events:none}
+#shade{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:move}
+#output{width:100%;display:block;border-radius:8px}
+.hint{color:#526c5c;font-size:14px;line-height:1.5}
+#resultSection{display:none}
+#status{font-size:14px}
+</style>
+</head>
+<body>
+<main>
+<h1>🎵 Min körstämma</h1>
+<p>Fotografera en takt, några takter eller en hel notsida.</p>
+<section>
+<h2>1. Ta ett foto</h2>
+<input id="camera" type="file" accept="image/*" capture="environment">
+<p class="hint">Välj kameran eller en befintlig bild.</p>
+</section>
+<section id="editSection" hidden>
+<h2>2. Välj ditt notavsnitt</h2>
+<p class="hint">Dra <strong>inne i den gröna rutan</strong> för att flytta den. Dra i <strong>hörnen</strong> för att ändra storlek.</p>
+<div id="editor">
+<img id="photo" alt="Ditt fotograferade notblad">
+<svg id="shade" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Flyttbar beskärningsruta">
+<path id="outside" fill="rgba(0,0,0,.46)" fill-rule="evenodd"></path>
+<rect id="frame" fill="transparent" stroke="#19ba67" stroke-width="0.65" vector-effect="non-scaling-stroke"></rect>
+<g id="handles" fill="#fff" stroke="#139b52" stroke-width="0.7" vector-effect="non-scaling-stroke"></g>
+</svg>
+</div>
+<p>
+<button id="done">Klar – beskär bilden</button>
+<button id="reset" class="secondary">Återställ rutan</button>
+</p>
+</section>
+<section id="resultSection">
+<h2>3. Ditt notavsnitt</h2>
+<img id="output" alt="Beskuret notavsnitt">
+<p id="dimensions" class="hint"></p>
+<button id="save">Spara notbild</button>
+<button id="again" class="secondary">Ändra beskärning</button>
+</section>
+<p id="status" role="status">Redo att fotografera.</p>
+<p class="hint">Version 15.0.3 testar kamera och beskärning. Automatisk notigenkänning kommer senare.</p>
+</main>
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const svg=$('shade'),photo=$('photo');
+let rect={x:.08,y:.12,w:.84,h:.76},drag=null,imageURL=null,resultURL=null;
+const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
+function resetRect(){rect={x:.08,y:.12,w:.84,h:.76};draw()}
+function draw(){
+ const x=rect.x*100,y=rect.y*100,w=rect.w*100,h=rect.h*100;
+ $('outside').setAttribute('d','M0 0 H100 V100 H0 Z M'+x+' '+y+' V'+(y+h)+' H'+(x+w)+' V'+y+' Z');
+ const frame=$('frame');
+ for(const [k,v] of Object.entries({x,y,width:w,height:h}))frame.setAttribute(k,v);
+ const g=$('handles');g.replaceChildren();
+ for(const [corner,cx,cy] of [['nw',x,y],['ne',x+w,y],['sw',x,y+h],['se',x+w,y+h]]){
+ const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+ c.setAttribute('cx',cx);c.setAttribute('cy',cy);c.setAttribute('r',2.4);
+ c.setAttribute('data-corner',corner);
+ c.setAttribute('stroke-width','1.2');c.setAttribute('vector-effect','non-scaling-stroke');
+ g.appendChild(c);
+ }
+}
+function point(e){
+ const b=svg.getBoundingClientRect();
+ return{x:clamp((e.clientX-b.left)/b.width,0,1),y:clamp((e.clientY-b.top)/b.height,0,1)};
+}
+function mode(p){
+ const b=svg.getBoundingClientRect(),tol=Math.max(0.025,22/Math.min(b.width,b.height));
+ for(const [name,x,y] of [['nw',rect.x,rect.y],['ne',rect.x+rect.w,rect.y],['sw',rect.x,rect.y+rect.h],['se',rect.x+rect.w,rect.y+rect.h]]){
+ if(Math.abs(p.x-x)<tol&&Math.abs(p.y-y)<tol)return name;
+ }
+ if(p.x>=rect.x&&p.x<=rect.x+rect.w&&p.y>=rect.y&&p.y<=rect.y+rect.h)return 'move';
+ return null;
+}
+svg.addEventListener('pointerdown',e=>{
+ if(!photo.naturalWidth)return;
+ const p=point(e),m=mode(p);
+ if(!m)return;
+ drag={m,p,r:{...rect}};
+ svg.setPointerCapture(e.pointerId);e.preventDefault();
+});
+svg.addEventListener('pointermove',e=>{
+ if(!drag)return;
+ const p=point(e),dx=p.x-drag.p.x,dy=p.y-drag.p.y,r=drag.r,min=.055;
+ if(drag.m==='move'){
+ rect.x=clamp(r.x+dx,0,1-r.w);rect.y=clamp(r.y+dy,0,1-r.h);
+ }else{
+ let left=r.x,top=r.y,right=r.x+r.w,bottom=r.y+r.h;
+ if(drag.m.includes('w'))left=clamp(r.x+dx,0,right-min);
+ if(drag.m.includes('e'))right=clamp(r.x+r.w+dx,left+min,1);
+ if(drag.m.includes('n'))top=clamp(r.y+dy,0,bottom-min);
+ if(drag.m.includes('s'))bottom=clamp(r.y+r.h+dy,top+min,1);
+ rect={x:left,y:top,w:right-left,h:bottom-top};
+ }
+ draw();e.preventDefault();
+});
+function end(){drag=null}
+svg.addEventListener('pointerup',end);svg.addEventListener('pointercancel',end);
+$('camera').addEventListener('change',e=>{
+ const file=e.target.files&&e.target.files[0];if(!file)return;
+ if(imageURL)URL.revokeObjectURL(imageURL);
+ imageURL=URL.createObjectURL(file);
+ photo.onload=()=>{
+ resetRect();$('editSection').hidden=false;$('resultSection').style.display='none';
+ $('status').textContent='Bilden är klar. Flytta eller ändra storlek på den gröna rutan.';
+ };
+ photo.onerror=()=>$('status').textContent='Det gick inte att läsa bilden.';
+ photo.src=imageURL;
+});
+$('reset').onclick=resetRect;
+$('done').onclick=()=>{
+ if(!photo.naturalWidth)return;
+ const w=photo.naturalWidth,h=photo.naturalHeight;
+ const sx=Math.round(rect.x*w),sy=Math.round(rect.y*h);
+ const sw=Math.max(1,Math.min(w-sx,Math.round(rect.w*w)));
+ const sh=Math.max(1,Math.min(h-sy,Math.round(rect.h*h)));
+ const canvas=document.createElement('canvas');canvas.width=sw;canvas.height=sh;
+ canvas.getContext('2d').drawImage(photo,sx,sy,sw,sh,0,0,sw,sh);
+ canvas.toBlob(blob=>{
+ if(!blob){$('status').textContent='Beskärningen misslyckades.';return}
+ if(resultURL)URL.revokeObjectURL(resultURL);
+ resultURL=URL.createObjectURL(blob);
+ $('output').src=resultURL;
+ $('dimensions').textContent=sw+' × '+sh+' pixlar';
+ $('resultSection').style.display='block';
+ $('resultSection').scrollIntoView({behavior:'smooth',block:'start'});
+ $('status').textContent='Notavsnittet är klart.';
+ },'image/png');
+};
+$('again').onclick=()=>$('editSection').scrollIntoView({behavior:'smooth'});
+$('save').onclick=()=>{
+ if(!resultURL)return;
+ const a=document.createElement('a');a.href=resultURL;a.download='notavsnitt.png';document.body.appendChild(a);a.click();a.remove();
+};
+draw();
+})();
+</script>
+</body>
+</html>
